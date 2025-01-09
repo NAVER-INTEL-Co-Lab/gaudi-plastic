@@ -6,8 +6,8 @@ python run_parallel.py \
     --config_name drq \
     --seeds 0 1 2 3 4 \
     --num_games 26 \
-    --num_devices 4 \
-    --num_exp_per_device 3 \
+    --num_devices 8 \
+    --num_exp_per_device 1 \
     --overrides agent.optimize_per_env_step=2 \
                 agent.reset_type=llf \
                 agent.reset_target=True \

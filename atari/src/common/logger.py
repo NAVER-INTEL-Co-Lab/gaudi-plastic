@@ -13,6 +13,7 @@ class WandbAgentLogger(object):
     def __init__(self, cfg):
         self.cfg = cfg
         dict_cfg = OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
+        
         wandb.init(project=cfg.project_name, 
                    entity=cfg.entity,
                    config=dict_cfg,

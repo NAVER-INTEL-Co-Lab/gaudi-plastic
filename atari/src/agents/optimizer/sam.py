@@ -23,6 +23,9 @@ from torch.optim import *
 from typing import Type, cast, Union
 
 
+import habana_frameworks.torch.core as htcore
+
+
 class SAM(torch.optim.Optimizer):
     def __init__(self, params, base_optimizer: Union[Optimizer, str], rho=0.05, adaptive=False, **kwargs):
         assert rho >= 0.0, f"Invalid rho, should be non-negative: {rho}"
@@ -74,8 +77,10 @@ class SAM(torch.optim.Optimizer):
         closure = torch.enable_grad()(closure)  # the closure should do a full forward-backward pass
 
         self.first_step(zero_grad=True)
+        htcore.mark_step()
         loss = closure()
         self.second_step() 
+        htcore.mark_step()
         return loss  # return L_B(w+eps).
 
     def _grad_norm(self):

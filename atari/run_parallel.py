@@ -25,8 +25,8 @@ if __name__ == '__main__':
     parser.add_argument('--num_seeds',    type=int,     default=1)
     parser.add_argument('--seeds',    type=int,     default=[],  nargs='*')
     parser.add_argument('--device_start',  type=int,     default=0)
-    parser.add_argument('--num_devices',  type=int,     default=2)
-    parser.add_argument('--num_exp_per_device',  type=int,  default=3)
+    parser.add_argument('--num_devices',  type=int,     default=8)
+    parser.add_argument('--num_exp_per_device',  type=int,  default=1)
     parser.add_argument('--overrides',    type=str,     default=[],      nargs='*') 
 
     args = vars(parser.parse_args())
@@ -66,38 +66,36 @@ if __name__ == '__main__':
     # https://docs.python.org/3.5/library/multiprocessing.html#contexts-and-start-methods
     mp.set_start_method('spawn') 
     # available_gpus = list(range(device_start, num_devices+device_start))
-    available_gpus = list(range(num_devices))
-    process_dict = {gpu_id: [] for gpu_id in available_gpus}
+    available_hpus = list(range(num_devices))
+    process_dict = {hpu_id: [] for hpu_id in available_hpus}
 
     for exp in experiments:
         wait = True
-        # wait until there exists a finished process
         while wait:
-            # Find all finished processes and register available GPU
-            for gpu_id, processes in process_dict.items():
+            # Check for finished processes and free HPUs
+            for hpu_id, processes in process_dict.items():
                 for process in processes:
                     if not process.is_alive():
-                        print(f"Process {process.pid} on GPU {gpu_id} finished.")
+                        print(f"Process {process.pid} on HPU {hpu_id} finished.")
                         processes.remove(process)
-                        if gpu_id not in available_gpus:
-                            available_gpus.append(gpu_id)
+                        if hpu_id not in available_hpus:
+                            available_hpus.append(hpu_id)
             
-            for gpu_id, processes in process_dict.items():
+            for hpu_id, processes in process_dict.items():
                 if len(processes) < num_exp_per_device:
                     wait = False
-                    gpu_id, processes = min(process_dict.items(), key=lambda x: len(x[1]))
+                    hpu_id, processes = min(process_dict.items(), key=lambda x: len(x[1]))
                     break
             
             time.sleep(1)
 
-        # get running processes in the gpu
-        processes = process_dict[gpu_id]
-        exp['overrides'].append('device=' + 'cuda:' + str(gpu_id))
+        # Assign HPU device to the experiment
+        exp['overrides'].append('device=hpu')
         process = multiprocessing.Process(target=run, args=(exp, ))
         process.start()
         processes.append(process)
-        print(f"Process {process.pid} on GPU {gpu_id} started.")
+        print(f"Process {process.pid} on HPU {hpu_id} started.")
 
-        # check if the GPU has reached its maximum number of processes
+        # Remove HPU if it has reached the maximum number of processes
         if len(processes) == num_exp_per_device:
-            available_gpus.remove(gpu_id)
+            available_hpus.remove(hpu_id)

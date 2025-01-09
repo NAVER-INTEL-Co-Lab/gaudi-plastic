@@ -16,6 +16,9 @@ from src.common.eval_utils import get_param_cnt_ratio
 from .optimizer.sam import SAM
 from src.common.bypass_bn import enable_running_stats, disable_running_stats
 
+import habana_frameworks.torch.core as htcore
+from habana_frameworks.torch.utils.internal import is_lazy
+
 class BaseAgent(metaclass=ABCMeta):
     def __init__(self,
                  cfg,
@@ -40,6 +43,8 @@ class BaseAgent(metaclass=ABCMeta):
         self.optimizer = self._build_optimizer(self.model.parameters(), cfg.optimizer)
         self.eps_scheduler = LinearScheduler(**cfg.eps_scheduler)
         self.noise_scheduler = LinearScheduler(**cfg.noise_scheduler)
+        self.layer_wise_outputs = {}
+
 
     @classmethod
     def get_name(cls):
@@ -48,7 +53,6 @@ class BaseAgent(metaclass=ABCMeta):
     def _build_optimizer(self, param_group, optimizer_cfg):
         if 'type' in optimizer_cfg:
             optimizer_type = optimizer_cfg.pop('type')
-
         if optimizer_type == 'adam':
             optimizer = optim.Adam(param_group, 
                               **optimizer_cfg)
@@ -100,9 +104,36 @@ class BaseAgent(metaclass=ABCMeta):
         exp_noise = 1.0
 
         obs = self.train_env.reset()
+
+
+        def save_outputs_hook(layer_id):
+            def fn(_, __, output):
+                self.layer_wise_outputs[layer_id] = output
+            return fn
+
+        def get_all_layers(net, prefix=''):
+            for name, layer in net._modules.items():
+                if isinstance(layer, nn.Sequential):
+                    for layer_idx, sub_layer in enumerate(layer):
+                        sub_layer.register_forward_hook(
+                            save_outputs_hook(
+                                prefix + '.' + name + '.' 
+                                + sub_layer.__class__.__name__ + '.' + str(layer_idx)
+                            )
+                        )
+                else:
+                    get_all_layers(layer, prefix)
+
+        get_all_layers(self.model.backbone, 'backbone')
+        get_all_layers(self.model.policy, 'policy')
+
+        if not is_lazy():
+            self.model = torch.compile(self.model, backend="hpu_backend")
         self.initial_model = copy.deepcopy(self.model)
+
         online_model = self.model
         target_model = self.target_model
+
 
         if self.cfg.exploration_model == 'online':
             exploration_model = self.model
@@ -178,6 +209,7 @@ class BaseAgent(metaclass=ABCMeta):
                                     self.model.parameters(), 
                                     self.cfg.clip_grad_norm
                                 )
+                                htcore.mark_step()
                                 return loss
                     
                     # compute loss, regularizer, and determine whether or not reset.
@@ -188,11 +220,11 @@ class BaseAgent(metaclass=ABCMeta):
                                                                       target_model,
                                                                       reset_noise=closure is None or noise_in_perturbation)
                     rl_loss = loss_and_regs
-                    
                     # optimization
                     loss = rl_loss
                     self.optimizer.zero_grad()
                     loss.backward()
+                    htcore.mark_step()
                     param_grad_norm = torch.nn.utils.clip_grad_norm_(
                         self.model.parameters(), 
                         self.cfg.clip_grad_norm
@@ -200,20 +232,23 @@ class BaseAgent(metaclass=ABCMeta):
                     if self.optimizer_type == 'sam':
                         if not self.sam_backbone and not self.sam_head:
                             self.optimizer.base_optimizer.step()
+                            htcore.mark_step()
                         else:
                             if not self.sam_backbone:
                                 for param in online_model.backbone.parameters():
                                     self.optimizer.state[param]["old_p"] = param.data.clone()
                                     param.grad_backup = param.grad.data.clone()
-                                    param.requires_grad = False
+                                    param.requires_grad = False # Changing Grad state is not supported for Eager mode
                             if not self.sam_head:
                                 for param in online_model.policy.parameters():
                                     self.optimizer.state[param]["old_p"] = param.data.clone()
                                     param.grad_backup = param.grad.data.clone()
-                                    param.requires_grad = False
+                                    param.requires_grad = False # Changing Grad state is not supported for Eager mode
                             self.optimizer.step(closure)  # apply closure
+                            htcore.mark_step()
                     else:
                         self.optimizer.step(closure)  # apply closure
+                        htcore.mark_step()
 
                     train_logs = {
                         'eps': eps,
@@ -259,7 +294,6 @@ class BaseAgent(metaclass=ABCMeta):
 
                         elif reset_weight_type == 'original':
                             reset_model = copy.deepcopy(self.initial_model)
-
                         # keep_mask_dict: {key: param_mask} 
                         # this dictionary indicates which parameters to keep (1: keep, 0: reset)
                         keep_mask_dict = {}
@@ -309,7 +343,7 @@ class BaseAgent(metaclass=ABCMeta):
 
                         if self.cfg.pd_per_optimize_step != -1:
                             self.initial_model.policy = copy.deepcopy(online_model.policy)
-
+                        
                     self.logger.update_log(mode='train', **train_logs)
                     optimize_step += 1
 
@@ -341,32 +375,13 @@ class BaseAgent(metaclass=ABCMeta):
         target_model = self.target_model
 
         # get output of each sublayer with hook
-        layer_wise_outputs = {}
-        def save_outputs_hook(layer_id):
-            def fn(_, __, output):
-                layer_wise_outputs[layer_id] = output
-            return fn
-
-        def get_all_layers(net, prefix=''):
-            for name, layer in net._modules.items():
-                if isinstance(layer, nn.Sequential):
-                    for layer_idx, sub_layer in enumerate(layer):
-                        sub_layer.register_forward_hook(
-                            save_outputs_hook(
-                                prefix + '.' + name + '.' 
-                                + sub_layer.__class__.__name__ + '.' + str(layer_idx)
-                            )
-                        )
-                else:
-                    get_all_layers(layer, prefix)
-
-        get_all_layers(online_model.backbone, 'backbone')
-        get_all_layers(online_model.policy, 'policy')
-
+        layer_wise_outputs = self.layer_wise_outputs
+        
         # forward
         batch = self.buffer.sample(self.cfg.batch_size, mode='eval')
         batch['obs'].requires_grad=True
         rl_loss, preds, targets = self.forward(online_model, target_model, batch, mode='eval')
+        htcore.mark_step()
 
         # explained variance    
         pred_var = torch.var(preds)
@@ -408,13 +423,14 @@ class BaseAgent(metaclass=ABCMeta):
         # dead neuron w.r.t activation
         num_zero_activation_params, num_activation_params = {}, {}
         for layer_name, activations in layer_wise_outputs.items():
-            num_zero_activation_params[layer_name] = torch.sum(activations == 0).item()
+            # num_zero_activation_params[layer_name] = torch.sum(activations == 0).item() Doesn't work in compile mode
+            num_zero_activation_params[layer_name] = torch.sum(activations.detach().cpu() == 0).item()
             num_activation_params[layer_name] = activations.numel()
 
         zero_activation_ratio = get_param_cnt_ratio(
             num_zero_activation_params, num_activation_params, 'zero_activation_ratio', activation = True)
 
-        ratios = {}        
+        ratios = {}
         ratios.update(zero_activation_ratio)
 
         # log evaluation metrics

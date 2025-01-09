@@ -11,6 +11,7 @@ from dotmap import DotMap
 import torch
 import wandb
 import numpy as np
+import habana_frameworks.torch.core as htcore
 
 # update
 def run(args):    
@@ -22,7 +23,6 @@ def run(args):
     # Hydra Compose
     initialize(version_base=None, config_path=config_path) 
     cfg = compose(config_name=config_name, overrides=overrides)
-    
     # device
     device = torch.device(cfg.device)
     set_global_seeds(seed=cfg.seed)
@@ -59,7 +59,7 @@ def run(args):
     # agent
     agent = build_agent(cfg=cfg.agent,
                         device=device,
-                        train_env=train_env,
+                        train_env=train_env ,
                         eval_env=eval_env,
                         logger=logger,
                         model=model)

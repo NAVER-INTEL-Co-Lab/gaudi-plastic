@@ -21,6 +21,9 @@ import copy
 from utils.SAM import SAM
 from utils.metric_utils import get_param_cnt_ratio, AverageMeterSet
 from utils.train_utils import CReLU, init_normalization, LocalSignalMixing
+import habana_frameworks.torch.core as htcore
+import habana_frameworks.torch.hpu.random as htrandom
+from habana_frameworks.torch.utils.internal import is_lazy
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -36,7 +39,7 @@ def str2bool(v):
 def run(args):
     args = DotMap(args)
     
-    wandb.init(project="gpa_cifar10")
+    wandb.init(project="gpa_cifar10_gaudi")
     wandb.config.update(args)
 
     ########################
@@ -46,10 +49,11 @@ def run(args):
     seed = args.seed
     random.seed(seed)
     torch.manual_seed(seed)
+    htrandom.manual_seed_all(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
 
-    device = f'cuda:{args.gpu}' if torch.cuda.is_available() else 'cpu'
+    device = torch.device('hpu')
 
     ########################
     ## Prepare Dataset
@@ -62,18 +66,18 @@ def run(args):
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=trans)
     testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=trans)
     
-    def load_to_gpu(dataset, device):
-        data = torch.empty((len(dataset), 3, 32, 32), device=device)
-        labels = torch.empty(len(dataset), dtype=torch.long, device=device)
+    # def load_to_gpu(dataset, device):
+    #     data = torch.empty((len(dataset), 3, 32, 32), device=device)
+    #     labels = torch.empty(len(dataset), dtype=torch.long, device=device)
 
-        for i, (image, label) in enumerate(dataset):
-            data[i] = image.to(device)
-            labels[i] = torch.tensor(label, device=device)
+    #     for i, (image, label) in enumerate(dataset):
+    #         data[i] = image.to(device)
+    #         labels[i] = torch.tensor(label, device=device)
 
-        return torch.utils.data.TensorDataset(data, labels)
+    #     return torch.utils.data.TensorDataset(data, labels)
 
-    trainset = load_to_gpu(trainset, device)
-    testset = load_to_gpu(testset, device)
+    # trainset = load_to_gpu(trainset, device)
+    # testset = load_to_gpu(testset, device)
     
     train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True)
     test_loader = torch.utils.data.DataLoader(testset, batch_size=500, shuffle=False)
@@ -219,6 +223,7 @@ def run(args):
         done_with_chunk = 0
         while not done_with_chunk:
             for inputs, targets in train_loader:
+                inputs, targets = inputs.to(device), targets.to(device)
                 optimizer.zero_grad()
                 outputs = model(inputs)
                 _, preds = outputs.max(1)
@@ -226,15 +231,18 @@ def run(args):
                 _targets = (targets + chunk_idx) % 10
                 loss = criterion(outputs, _targets)
                 loss.backward()
-                
+                htcore.mark_step()
                 if optimizer_type == 'sgd':
                     optimizer.step()
-                    
+                    htcore.mark_step()
                 elif optimizer_type == 'sam':
                     optimizer.first_step(zero_grad=True)
+                    htcore.mark_step()
                     second_loss = criterion(model(inputs), _targets)
                     second_loss.backward()
+                    htcore.mark_step()
                     optimizer.second_step(zero_grad=True)
+                    htcore.mark_step()
 
                 acc = preds.eq(_targets).float().mean()
                 iter = iter + 1
@@ -335,18 +343,20 @@ def test(loader, model, device, chunk_idx):
     # evaluation loop
     criterion = nn.CrossEntropyLoss().to(device)
     for inputs, targets in loader:
+        inputs, targets = inputs.to(device), targets.to(device)
         outputs = model(inputs)
         _, preds = outputs.max(1)
         _targets = (targets + chunk_idx) % 10
         loss = criterion(outputs, _targets)
         acc = preds.eq(_targets).float().mean()
-
+        htcore.mark_step()
         # dead neuron w.r.t gradient
         num_zero_grad_params, num_grad_params = {}, {}
         for layer_name, param in model.named_parameters():
             if param.grad is not None:
-                num_zero_grad_params[layer_name] = torch.sum(param.grad == 0).item()
-                num_grad_params[layer_name] = param.grad.numel()
+                param_grad = param.grad.detach().clone().to('cpu')
+                num_zero_grad_params[layer_name] = torch.sum(param_grad).item()
+                num_grad_params[layer_name] = param_grad.numel()
 
         # dead neuron w.r.t activation
         num_zero_activation_params, num_activation_params = {}, {}

@@ -124,7 +124,8 @@ class RainbowPolicy(BasePolicy):
 
     def forward(self, x, log=False):
         if self.duel:
-            scale_grad = getattr(ScaleGrad, "apply", None)
+            #scale_grad = getattr(ScaleGrad, "apply", None) # Due to this line, Eager mode doesn't support
+            scale_grad = ScaleGrad.apply
             x = scale_grad(x, self.grad_scale)
             v = self.fc_v(x)
             adv = self.fc_adv(x)

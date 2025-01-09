@@ -18,7 +18,8 @@ conda activate synthetic
 
 To test the baseline for input plasticity, run
 ```
-python input_adaptation.py 
+PT_HPU_LAZY_MODE=0 python input_adaptation.py  # Eager Mode
+PT_HPU_LAZY_MODE=1 python input_adaptation.py  # Lazy Mode
 ```
 
 To test the PLASTIC for input plasticity, run
