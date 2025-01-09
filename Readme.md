@@ -1,6 +1,6 @@
 # Improving Input & Label Plasticity for Sample Efficient RL
 
-This repository is an official PyTorch implementation of the paper, PLASTIC: Improving Input and Label Plasticity for Sample Efficient Reinforcement Learning, NeurIPS 2023.
+This repository is a gaudi implementation of the paper, PLASTIC: Improving Input and Label Plasticity for Sample Efficient Reinforcement Learning, NeurIPS 2023.
 
 [arXiv](https://arxiv.org/abs/2306.10711) /
 [slide](https://drive.google.com/file/d/1-QeWhom9l7mUt3m7zJV-_DIGMtL7F2Cq/view) /
@@ -23,7 +23,7 @@ To run the synthetic experiments, please follow the instructions of `Readme.md` 
 
 To run the Atari-100k experiments, please follow the instructions of `Readme.md` in the folder `atari`.
 
-To run the DMC-M experiments, please follow the instructions of `Readme.md` in the folder `dmc`.
+Original DMC is based on jax, which is not supported in gaudi. 
 
 ## Results
 
