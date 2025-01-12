@@ -1,18 +1,22 @@
 # Atari-100k
 
 ## Requirements
-We assume you have access to a GPU that can run CUDA 11.1 and CUDNN 8. 
-Then, the simplest way to install all required dependencies is to create an anaconda environment by running
+We assume you have habanalabs-installer.sh with version of 1.18.0.
 
 ```
-conda env create -f requirements.yaml
-pip install hydra-core --upgrade
-pip install opencv-python
+export HABANALABS_VIRTUAL_DIR="/your/directory/to/venv" # Recommend /project_dir/atari/atari_env
+./habanalabs-installer.sh install -t dependencies
+./habanalabs-installer.sh install --type pytorch --venv
 ```
 
-After the instalation ends you can activate your environment with
+then activate your venv.
 ```
-conda activate atari
+source ./atari_env/bin/activate
+```
+
+Install requirements.txt
+```
+pip install -r requirements.txt
 ```
 
 ## Installing Atari environment
@@ -36,21 +40,26 @@ python -m atari_py.import_roms rars
 
 ## Instructions
 
-To run a single run, use the `run.py` script
+To run a single run, activate your env, then use the `run.py` script
 ```
-python run.py 
+PT_HPU_LAZY_MODE=0 python run.py # Eager mode
+PT_HPU_LAZY_MODE=1 python run.py # Lazy mode
 ```
 
 To run the Atari-100k benchmark (26 games with 5 random sees), use `run_parallel.py` script
 ```
-python run_parallel.py
+PT_HPU_LAZY_MODE=0 python run_parallel.py # Eager mode
+PT_HPU_LAZY_MODE=1 python run_parallel.py # Lazy mode
 ```
 
 To reproduce the performance of PLASTIC* or PLASTIC, use scripts inside the `script`.
 ```
-bash scripts/NeurIPS2023/drq_plastic_dagger_rr2.sh
+PT_HPU_LAZY_MODE=0 bash scripts/NeurIPS2023/drq_plastic_dagger_rr2.sh # Eager mode
+PT_HPU_LAZY_MODE=1 bash scripts/NeurIPS2023/drq_plastic_dagger_rr2.sh # Lazy mode
 
-bash scripts/NeurIPS2023/drq_plastic_rr2.sh
+
+PT_HPU_LAZY_MODE=0 bash scripts/NeurIPS2023/drq_plastic_rr2.sh # Eager mode
+PT_HPU_LAZY_MODE=1 bash scripts/NeurIPS2023/drq_plastic_rr2.sh # Lazy mode
 ```
 
 

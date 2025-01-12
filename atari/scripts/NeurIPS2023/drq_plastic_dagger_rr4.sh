@@ -7,7 +7,7 @@ python run_parallel.py \
     --seeds 0 1 2 3 4 \
     --num_games 26 \
     --num_devices 3 \
-    --num_exp_per_device 3 \
+    --num_exp_per_device 1 \
     --overrides agent.optimize_per_env_step=4 \
                 agent.reset_type=llf \
                 agent.reset_target=True \

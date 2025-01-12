@@ -46,9 +46,3 @@ is marginal. Conversely, Concatenated ReLU (CReLU) and periodic reinitialization
   year={2023}
 }
 ```
-
-## Contact
-
-For personal communication, please contact Hojoon Lee, Hanseul Cho, or Hyunseung Kim at 
-
-`{joonleesky, jhs4015, mynsng}@kaist.ac.kr`.

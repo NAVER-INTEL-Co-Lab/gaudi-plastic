@@ -376,7 +376,10 @@ def test(loader, model, device):
         num_zero_grad_params, num_grad_params = {}, {}
         for layer_name, param in model.named_parameters():
             if param.grad is not None:
-                param_grad = param.grad.detach().clone() # To CPU when Eager
+                if is_lazy():
+                    param_grad = param.grad.detach().clone() # To CPU when Eager
+                else:
+                    param_grad = param.grad.detach().clone().cpu()
                 num_zero_grad_params[layer_name] = torch.sum(param_grad == 0).item()
                 num_grad_params[layer_name] = param_grad.numel()
 
