@@ -1,4 +1,4 @@
-# Improving Input & Label Plasticity for Sample Efficient RL
+# Improving Input & Label Plasticity for Sample Efficient RL (Intel Gaudi Implementation)
 
 This repository is a gaudi implementation of the paper, PLASTIC: Improving Input and Label Plasticity for Sample Efficient Reinforcement Learning, NeurIPS 2023.
 
